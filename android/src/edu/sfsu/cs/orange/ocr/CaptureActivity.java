@@ -20,9 +20,12 @@ package edu.sfsu.cs.orange.ocr;
 import java.io.File;
 import java.io.IOException;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -37,6 +40,7 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.Message;
 import android.preference.PreferenceManager;
 import android.text.ClipboardManager;
 import android.text.SpannableStringBuilder;
@@ -49,6 +53,7 @@ import android.view.ContextMenu.ContextMenuInfo;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.Menu;
+import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
@@ -76,6 +81,7 @@ import edu.sfsu.cs.orange.ocr.language.TranslateAsyncTask;
  * The code for this class was adapted from the ZXing project:
  * http://code.google.com/p/zxing/
  */
+@SuppressLint("NewApi")
 public final class CaptureActivity extends Activity implements
 		SurfaceHolder.Callback, ShutterButton.OnShutterButtonListener {
 
@@ -216,6 +222,28 @@ public final class CaptureActivity extends Activity implements
 	private static boolean isFirstLaunch; // True if this is the first time the
 											// app is being run
 
+	// Intent request codes
+    private static final int REQUEST_CONNECT_DEVICE = 1;
+    private static final int REQUEST_ENABLE_BT = 2;
+    
+    private BluetoothAdapter mBluetoothAdapter = null;
+    
+    private static final boolean D = true;
+    
+    private BluetoothChatService mChatService = null;
+    
+    private StringBuffer mOutStringBuffer;
+//    private EditText mOutEditText;
+    
+    public static final int MESSAGE_STATE_CHANGE = 1;
+    public static final int MESSAGE_READ = 2;
+    public static final int MESSAGE_WRITE = 3;
+    public static final int MESSAGE_DEVICE_NAME = 4;
+    public static final int MESSAGE_TOAST = 5;
+    public static final String DEVICE_NAME = "device_name";
+    public static final String TOAST = "toast";
+    private String mConnectedDeviceName = null;
+    
 	Handler getHandler() {
 		return handler;
 	}
@@ -592,91 +620,233 @@ public final class CaptureActivity extends Activity implements
 
 	@Override
 	public boolean onKeyDown(int keyCode, KeyEvent event) {
-		// if (keyCode == KeyEvent.KEYCODE_BACK) {
-		//
-		// // First check if we're paused in continuous mode, and if so, just
-		// unpause.
-		// if (isPaused) {
-		// Log.d(TAG, "only resuming continuous recognition, not quitting...");
-		// resumeContinuousDecoding();
-		// return true;
-		// }
-		//
-		// // Exit the app if we're not viewing an OCR result.
-		// if (lastResult == null) {
-		// setResult(RESULT_CANCELED);
-		// finish();
-		// return true;
-		// } else {
-		// // Go back to previewing in regular OCR mode.
-		// resetStatusView();
-		// if (handler != null) {
-		// handler.sendEmptyMessage(R.id.restart_preview);
-		// }
-		// return true;
-		// }
-		// } else if (keyCode == KeyEvent.KEYCODE_CAMERA) {
-		// if (isContinuousModeActive) {
-		// onShutterButtonPressContinuous();
-		// } else {
-		// handler.hardwareShutterButtonClick();
-		// }
-		// return true;
-		// } else if (keyCode == KeyEvent.KEYCODE_FOCUS) {
-		// // Only perform autofocus if user is not holding down the button.
-		// if (event.getRepeatCount() == 0) {
-		// cameraManager.requestAutoFocus(500L);
-		// }
-		// // return true;
-		// }
-
+//		// if (keyCode == KeyEvent.KEYCODE_BACK) {
+//		//
+//		// // First check if we're paused in continuous mode, and if so, just
+//		// unpause.
+//		// if (isPaused) {
+//		// Log.d(TAG, "only resuming continuous recognition, not quitting...");
+//		// resumeContinuousDecoding();
+//		// return true;
+//		// }
+//		//
+//		// // Exit the app if we're not viewing an OCR result.
+//		// if (lastResult == null) {
+//		// setResult(RESULT_CANCELED);
+//		// finish();
+//		// return true;
+//		// } else {
+//		// // Go back to previewing in regular OCR mode.
+//		// resetStatusView();
+//		// if (handler != null) {
+//		// handler.sendEmptyMessage(R.id.restart_preview);
+//		// }
+//		// return true;
+//		// }
+//		// } else if (keyCode == KeyEvent.KEYCODE_CAMERA) {
+//		// if (isContinuousModeActive) {
+//		// onShutterButtonPressContinuous();
+//		// } else {
+//		// handler.hardwareShutterButtonClick();
+//		// }
+//		// return true;
+//		// } else if (keyCode == KeyEvent.KEYCODE_FOCUS) {
+//		// // Only perform autofocus if user is not holding down the button.
+//		// if (event.getRepeatCount() == 0) {
+//		// cameraManager.requestAutoFocus(500L);
+//		// }
+//		// // return true;
+//		// }
+//
 		if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
 			cameraManager.requestAutoFocus(0);
 			if (handler != null) {
 				handler.shutterButtonClick();
 			}
-			Log.d(TAG, ocrResultView.getText().toString());
+			
+//			String ocrText = ocrResultView.getText().toString();
+//			Log.d(TAG, ocrText);
+//			sendMessage(ocrText);
 
 			resetStatusView();
 			if (handler != null) {
 				handler.sendEmptyMessage(R.id.restart_preview);
 			}
 
+		} else if(keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+			Intent serverIntent = new Intent(this, DeviceListActivity.class);
+            startActivityForResult(serverIntent, REQUEST_CONNECT_DEVICE);
 		}
 		return true; // super.onKeyDown(keyCode, event);
 	}
+	
+	public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if(D) Log.d(TAG, "onActivityResult " + resultCode);
+        switch (requestCode) {
+        case REQUEST_CONNECT_DEVICE:
+            // When DeviceListActivity returns with a device to connect
+            if (resultCode == Activity.RESULT_OK) {
+                // Get the device MAC address
+                String address = data.getExtras()
+                                     .getString(DeviceListActivity.EXTRA_DEVICE_ADDRESS);
+                // Get the BLuetoothDevice object
+                BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
+                // Attempt to connect to the device
+                mChatService.connect(device);
+            }
+            break;
+        case REQUEST_ENABLE_BT:
+            // When the request to enable Bluetooth returns
+            if (resultCode == Activity.RESULT_OK) {
+            	// Initialize the BluetoothChatService to perform bluetooth connections
+                mChatService = new BluetoothChatService(this, mHandler);
+
+                // Initialize the buffer for outgoing messages
+                mOutStringBuffer = new StringBuffer("");
+            } else {
+                // User did not enable Bluetooth or an error occured
+                Log.d(TAG, "BT not enabled");
+                Toast.makeText(this, R.string.bt_not_enabled_leaving, Toast.LENGTH_SHORT).show();
+                finish();
+            }
+        }
+    }
+	
+	/**
+     * Sends a message.
+     * @param message  A string of text to send.
+     */
+    private void sendMessage(String message) {
+        // Check that we're actually connected before trying anything
+        if (mChatService.getState() != BluetoothChatService.STATE_CONNECTED) {
+            Toast.makeText(this, R.string.not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Check that there's actually something to send
+        if (message.length() > 0) {
+            // Get the message bytes and tell the BluetoothChatService to write
+            byte[] send = message.getBytes();
+            mChatService.write(send);
+
+            // Reset out string buffer to zero and clear the edit text field
+//            mOutStringBuffer.setLength(0);
+//            mOutEditText.setText(mOutStringBuffer);
+        }
+    }
+    
+    @Override
+    public void onStart() {
+        super.onStart();
+        if(D) Log.e(TAG, "++ ON START ++");
+
+        // If BT is not on, request that it be enabled.
+        // setupChat() will then be called during onActivityResult
+        if(mBluetoothAdapter == null) {
+        	mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        }
+        if (!mBluetoothAdapter.isEnabled()) {
+            Intent enableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+            startActivityForResult(enableIntent, REQUEST_ENABLE_BT);
+        // Otherwise, setup the chat session
+        } else {
+            if (mChatService == null) {
+            	// Initialize the BluetoothChatService to perform bluetooth connections
+                mChatService = new BluetoothChatService(this, mHandler);
+
+                // Initialize the buffer for outgoing messages
+                mOutStringBuffer = new StringBuffer("");
+            }
+        }
+    }
+
+ // The Handler that gets information back from the BluetoothChatService
+    
+    private final Handler mHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+            
+            case MESSAGE_DEVICE_NAME:
+                // save the connected device's name
+                mConnectedDeviceName = msg.getData().getString(DEVICE_NAME);
+                Toast.makeText(getApplicationContext(), "Connected to "
+                               + mConnectedDeviceName, Toast.LENGTH_SHORT).show();
+                break;
+            
+            }
+        }
+    };
 
 	@Override
 	public boolean onCreateOptionsMenu(Menu menu) {
+		super.onCreateOptionsMenu(menu);
 		// MenuInflater inflater = getMenuInflater();
 		// inflater.inflate(R.menu.options_menu, menu);
-		super.onCreateOptionsMenu(menu);
-		menu.add(0, SETTINGS_ID, 0, "Settings").setIcon(
-				android.R.drawable.ic_menu_preferences);
-		menu.add(0, ABOUT_ID, 0, "About").setIcon(
-				android.R.drawable.ic_menu_info_details);
+		// super.onCreateOptionsMenu(menu);
+		// menu.add(0, SETTINGS_ID, 0, "Settings").setIcon(
+		// android.R.drawable.ic_menu_preferences);
+		// menu.add(0, ABOUT_ID, 0, "About").setIcon(
+		// android.R.drawable.ic_menu_info_details);
+		// return true;
+
+		MenuInflater inflater = getMenuInflater();
+		inflater.inflate(R.menu.option_menu, menu);
 		return true;
 	}
 
+	// @Override
+	// public boolean onPrepareOptionsMenu(Menu menu) {
+	// super.onPrepareOptionsMenu(menu);
+	//
+	// MenuInflater inflater = getMenuInflater();
+	// inflater.inflate(R.menu.option_menu, menu);
+	// return true;
+	// }
+
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
-		Intent intent;
+		// Intent intent;
+		// switch (item.getItemId()) {
+		// case SETTINGS_ID: {
+		// intent = new Intent().setClass(this, PreferencesActivity.class);
+		// startActivity(intent);
+		// break;
+		// }
+		// case ABOUT_ID: {
+		// intent = new Intent(this, HelpActivity.class);
+		// intent.putExtra(HelpActivity.REQUESTED_PAGE_KEY,
+		// HelpActivity.ABOUT_PAGE);
+		// startActivity(intent);
+		// break;
+		// }
+		// }
+		// return super.onOptionsItemSelected(item);
+//		return true;
+		
 		switch (item.getItemId()) {
-		case SETTINGS_ID: {
-			intent = new Intent().setClass(this, PreferencesActivity.class);
-			startActivity(intent);
-			break;
-		}
-		case ABOUT_ID: {
-			intent = new Intent(this, HelpActivity.class);
-			intent.putExtra(HelpActivity.REQUESTED_PAGE_KEY,
-					HelpActivity.ABOUT_PAGE);
-			startActivity(intent);
-			break;
-		}
-		}
-		return super.onOptionsItemSelected(item);
+        case R.id.scan:
+            // Launch the DeviceListActivity to see devices and do scan
+            Intent serverIntent = new Intent(this, DeviceListActivity.class);
+            startActivityForResult(serverIntent, REQUEST_CONNECT_DEVICE);
+            return true;
+        case R.id.discoverable:
+            // Ensure this device is discoverable by others
+            ensureDiscoverable();
+            return true;
+        }
+        return false;
 	}
+	
+	private void ensureDiscoverable() {
+        if(D) Log.d(TAG, "ensure discoverable");
+        if (mBluetoothAdapter.getScanMode() !=
+            BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE) {
+            Intent discoverableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
+            discoverableIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300);
+            startActivity(discoverableIntent);
+        }
+    }
 
 	public void surfaceDestroyed(SurfaceHolder holder) {
 		hasSurface = false;
@@ -903,7 +1073,9 @@ public final class CaptureActivity extends Activity implements
 		TextView sourceLanguageTextView = (TextView) findViewById(R.id.source_language_text_view);
 		sourceLanguageTextView.setText(sourceLanguageReadable);
 		TextView ocrResultTextView = (TextView) findViewById(R.id.ocr_result_text_view);
-		ocrResultTextView.setText(ocrResult.getText());
+		String ocrText = ocrResult.getText();
+		ocrResultTextView.setText(ocrText);
+		sendMessage(ocrText);
 		// Crudely scale betweeen 22 and 32 -- bigger font for shorter text
 		int scaledSize = Math.max(22, 32 - ocrResult.getText().length() / 4);
 		ocrResultTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledSize);
